@@ -89,7 +89,7 @@ export class SPHEngine {
   }
 
   initParticles(config: 'dam' | 'drop' | 'fountain' | 'wave', count?: number) {
-    const n = count ?? this.particles.length || 800
+    const n = count ?? (this.particles.length || 800)
     this.particles = []
 
     switch (config) {
@@ -322,6 +322,31 @@ export class SPHEngine {
         const factor = strength * (1 - dist / radius)
         p.vx += (dx / dist) * factor
         p.vy += (dy / dist) * factor
+      }
+    }
+  }
+
+  applyContinuousForce(
+    x: number,
+    y: number,
+    strength: number,
+    dirX?: number,
+    dirY?: number
+  ) {
+    const radius = 60
+    for (const p of this.particles) {
+      const dx = p.x - x
+      const dy = p.y - y
+      const dist = Math.sqrt(dx * dx + dy * dy)
+      if (dist < radius && dist > 0.1) {
+        const factor = strength * (1 - dist / radius)
+        if (dirX !== undefined && dirY !== undefined) {
+          p.vx += dirX * factor
+          p.vy += dirY * factor
+        } else {
+          p.vx += (dx / dist) * factor
+          p.vy += (dy / dist) * factor
+        }
       }
     }
   }

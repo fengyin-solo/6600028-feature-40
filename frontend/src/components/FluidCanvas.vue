@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useFluidStore } from '../store/fluid'
 
 const store = useFluidStore()
@@ -7,6 +7,15 @@ const canvas = ref<HTMLCanvasElement | null>(null)
 
 const W = 800
 const H = 500
+
+const isDragging = ref(false)
+const mouseX = ref(0)
+const mouseY = ref(0)
+const lastMouseX = ref(0)
+const lastMouseY = ref(0)
+const dragStartX = ref(0)
+const dragStartY = ref(0)
+const DRAG_CLICK_THRESHOLD = 5
 
 function velocityToColor(speed: number): string {
   // Blue (slow) -> Green (medium) -> Red (fast)
@@ -45,6 +54,22 @@ function draw() {
     ctx.moveTo(0, y)
     ctx.lineTo(W, y)
     ctx.stroke()
+  }
+
+  if (store.engine && isDragging.value) {
+    const dx = mouseX.value - lastMouseX.value
+    const dy = mouseY.value - lastMouseY.value
+    const dist = Math.sqrt(dx * dx + dy * dy)
+    if (dist > 0.001) {
+      const nx = dx / dist
+      const ny = dy / dist
+      const speedFactor = Math.min(dist * 2, 60)
+      store.engine.applyContinuousForce(mouseX.value, mouseY.value, 20 + speedFactor, nx, ny)
+    } else {
+      store.engine.applyContinuousForce(mouseX.value, mouseY.value, 15)
+    }
+    lastMouseX.value = mouseX.value
+    lastMouseY.value = mouseY.value
   }
 
   if (!store.engine) return
@@ -107,14 +132,84 @@ function animate() {
   raf = requestAnimationFrame(animate)
 }
 
-function onClick(e: MouseEvent) {
-  if (!store.engine || !canvas.value) return
+function getCanvasCoords(clientX: number, clientY: number): { x: number; y: number } {
+  if (!canvas.value) return { x: 0, y: 0 }
   const rect = canvas.value.getBoundingClientRect()
   const scaleX = W / rect.width
   const scaleY = H / rect.height
-  const x = (e.clientX - rect.left) * scaleX
-  const y = (e.clientY - rect.top) * scaleY
-  store.engine.applyImpulse(x, y, 300)
+  return {
+    x: (clientX - rect.left) * scaleX,
+    y: (clientY - rect.top) * scaleY,
+  }
+}
+
+function onMouseDown(e: MouseEvent) {
+  const { x, y } = getCanvasCoords(e.clientX, e.clientY)
+  isDragging.value = true
+  mouseX.value = x
+  mouseY.value = y
+  lastMouseX.value = x
+  lastMouseY.value = y
+  dragStartX.value = x
+  dragStartY.value = y
+}
+
+function onMouseMove(e: MouseEvent) {
+  if (!isDragging.value) return
+  const { x, y } = getCanvasCoords(e.clientX, e.clientY)
+  mouseX.value = x
+  mouseY.value = y
+}
+
+function onMouseUp(e: MouseEvent) {
+  if (!isDragging.value) return
+  const { x, y } = getCanvasCoords(e.clientX, e.clientY)
+  const dx = x - dragStartX.value
+  const dy = y - dragStartY.value
+  const dist = Math.sqrt(dx * dx + dy * dy)
+  if (dist < DRAG_CLICK_THRESHOLD && store.engine) {
+    store.engine.applyImpulse(x, y, 300)
+  }
+  isDragging.value = false
+}
+
+function onMouseLeave() {
+  isDragging.value = false
+}
+
+function onTouchStart(e: TouchEvent) {
+  e.preventDefault()
+  if (e.touches.length === 0) return
+  const t = e.touches[0]
+  const { x, y } = getCanvasCoords(t.clientX, t.clientY)
+  isDragging.value = true
+  mouseX.value = x
+  mouseY.value = y
+  lastMouseX.value = x
+  lastMouseY.value = y
+  dragStartX.value = x
+  dragStartY.value = y
+}
+
+function onTouchMove(e: TouchEvent) {
+  e.preventDefault()
+  if (!isDragging.value || e.touches.length === 0) return
+  const t = e.touches[0]
+  const { x, y } = getCanvasCoords(t.clientX, t.clientY)
+  mouseX.value = x
+  mouseY.value = y
+}
+
+function onTouchEnd(e: TouchEvent) {
+  e.preventDefault()
+  if (!isDragging.value) return
+  const dx = mouseX.value - dragStartX.value
+  const dy = mouseY.value - dragStartY.value
+  const dist = Math.sqrt(dx * dx + dy * dy)
+  if (dist < DRAG_CLICK_THRESHOLD && store.engine) {
+    store.engine.applyImpulse(mouseX.value, mouseY.value, 300)
+  }
+  isDragging.value = false
 }
 
 onMounted(() => {
@@ -123,6 +218,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (raf) cancelAnimationFrame(raf)
+  isDragging.value = false
 })
 </script>
 
@@ -132,8 +228,15 @@ onUnmounted(() => {
       ref="canvas"
       :width="W"
       :height="H"
-      class="rounded-lg border border-gray-700 cursor-crosshair w-full max-w-[800px]"
-      @click="onClick"
+      class="rounded-lg border border-gray-700 cursor-crosshair w-full max-w-[800px] select-none touch-none"
+      @mousedown="onMouseDown"
+      @mousemove="onMouseMove"
+      @mouseup="onMouseUp"
+      @mouseleave="onMouseLeave"
+      @touchstart="onTouchStart"
+      @touchmove="onTouchMove"
+      @touchend="onTouchEnd"
+      @touchcancel="onTouchEnd"
     />
   </div>
 </template>
